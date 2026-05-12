@@ -1,0 +1,137 @@
+[
+  {
+    "name": "带缩略图的完整搜索",
+    "request": {
+      "key": "报告",
+      "dir": "/文档",
+      "category": 4,
+      "num": 5,
+      "page": 1,
+      "recursion": 1,
+      "web": 1
+    },
+    "mock_response": {
+      "errno": 0,
+      "request_id": 200,
+      "has_more": 1,
+      "display_count": 10,
+      "need_ai_search": true,
+      "list": [
+        {
+          "fs_id": 111,
+          "path": "/文档/report.pdf",
+          "server_filename": "report.pdf",
+          "size": 102400,
+          "isdir": 0,
+          "category": 4,
+          "server_mtime": 1700000000,
+          "score": 0.88,
+          "relevance_level": 3,
+          "fold": 2,
+          "docpreview": "第一季度报告...",
+          "thumbs": {
+            "url1": "https://t.example.com/s",
+            "url2": "https://t.example.com/m",
+            "url3": "https://t.example.com/l"
+          }
+        }
+      ],
+      "contentlist": []
+    },
+    "expect": {
+      "errno": 0,
+      "has_more": 1,
+      "display_count": 10,
+      "need_ai_search": true,
+      "list_count": 1,
+      "list[0].fs_id": 111,
+      "list[0].server_filename": "report.pdf",
+      "list[0].size": 102400,
+      "list[0].score": 0.88,
+      "list[0].relevance_level": 3,
+      "list[0].fold": 2,
+      "list[0].docpreview": "第一季度报告...",
+      "list[0].thumbs.url2": "https://t.example.com/m"
+    }
+  },
+  {
+    "name": "空结果搜索",
+    "request": {
+      "key": "不存在的文件xyz"
+    },
+    "mock_response": {
+      "errno": 0,
+      "request_id": 201,
+      "has_more": 0,
+      "display_count": 0,
+      "need_ai_search": false,
+      "list": [],
+      "contentlist": []
+    },
+    "expect": {
+      "errno": 0,
+      "has_more": 0,
+      "display_count": 0,
+      "need_ai_search": false,
+      "list_count": 0
+    }
+  },
+  {
+    "name": "多结果分页搜索",
+    "request": {
+      "key": "照片",
+      "category": 3,
+      "num": 2,
+      "page": 2,
+      "recursion": 1
+    },
+    "mock_response": {
+      "errno": 0,
+      "request_id": 202,
+      "has_more": 1,
+      "display_count": 5,
+      "need_ai_search": false,
+      "list": [
+        {
+          "fs_id": 222,
+          "path": "/相册/sunset.jpg",
+          "server_filename": "sunset.jpg",
+          "size": 2048000,
+          "isdir": 0,
+          "category": 3,
+          "server_mtime": 1710000000,
+          "score": 0.75,
+          "relevance_level": 2,
+          "fold": 0,
+          "docpreview": ""
+        },
+        {
+          "fs_id": 333,
+          "path": "/相册/mountain.png",
+          "server_filename": "mountain.png",
+          "size": 3072000,
+          "isdir": 0,
+          "category": 3,
+          "server_mtime": 1710001000,
+          "score": 0.60,
+          "relevance_level": 1,
+          "fold": 0,
+          "docpreview": ""
+        }
+      ],
+      "contentlist": []
+    },
+    "expect": {
+      "errno": 0,
+      "has_more": 1,
+      "display_count": 5,
+      "list_count": 2,
+      "list[0].fs_id": 222,
+      "list[0].server_filename": "sunset.jpg",
+      "list[0].size": 2048000,
+      "list[1].fs_id": 333,
+      "list[1].server_filename": "mountain.png",
+      "list[1].size": 3072000
+    }
+  }
+]
