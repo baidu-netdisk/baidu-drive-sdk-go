@@ -41,6 +41,12 @@ func TestUpload_CreateFile_Success(t *testing.T) {
 		if vals.Get("uploadid") != "test-upload-id" {
 			t.Errorf("uploadid = %q, want test-upload-id", vals.Get("uploadid"))
 		}
+		if vals.Has("local_ctime") {
+			t.Errorf("local_ctime should be omitted when unset, got %q", vals.Get("local_ctime"))
+		}
+		if vals.Has("local_mtime") {
+			t.Errorf("local_mtime should be omitted when unset, got %q", vals.Get("local_mtime"))
+		}
 
 		// 验证 block_list 是 JSON 数组
 		var blockList []string
@@ -97,12 +103,19 @@ func TestUpload_CreateFile_WithOptionalParams(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		bodyStr := string(body)
+		vals, _ := url.ParseQuery(bodyStr)
 
 		if !strings.Contains(bodyStr, "rtype=2") {
 			t.Errorf("body should contain rtype=2, got: %s", bodyStr)
 		}
 		if !strings.Contains(bodyStr, "is_revision=1") {
 			t.Errorf("body should contain is_revision=1, got: %s", bodyStr)
+		}
+		if vals.Get("local_ctime") != "1596009229" {
+			t.Errorf("local_ctime = %q, want 1596009229", vals.Get("local_ctime"))
+		}
+		if vals.Get("local_mtime") != "1596009230" {
+			t.Errorf("local_mtime = %q, want 1596009230", vals.Get("local_mtime"))
 		}
 
 		w.Write([]byte(`{
@@ -115,9 +128,13 @@ func TestUpload_CreateFile_WithOptionalParams(t *testing.T) {
 	defer ts.Close()
 
 	c := NewClient(WithBaseURL(ts.URL))
+	ctime := int64(1596009229)
+	mtime := int64(1596009230)
 	resp, err := c.Upload.CreateFile(ctx(), &CreateFileParams{
 		Path:       "/apps/test/file.txt",
 		Size:       2048,
+		LocalCtime: &ctime,
+		LocalMtime: &mtime,
 		UploadID:   "uid",
 		BlockList:  []string{"abc"},
 		RType:      Ptr(2),
