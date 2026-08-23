@@ -202,9 +202,14 @@ client = api.NewClient(api.WithAccessToken(token.AccessToken))
 ```go
 result, err := client.File.List(ctx, params)
 if err != nil {
+    // access_token 已过期时，使用保存的 refresh_token 刷新
+    if api.IsErrno(err, api.ErrnoAccessTokenExpired) {
+        // 调用 client.Auth.RefreshToken(...)
+    }
+
     // 检查特定错误码
     if api.IsErrno(err, api.ErrnoAccessDenied) {
-        // Token 过期或权限不足
+        // 身份验证失败，也可能是授权或接口权限问题
     }
 
     // 获取完整错误信息
@@ -218,15 +223,18 @@ if err != nil {
 
 常用错误码常量：
 
-| 常量                    | 值    | 含义                 |
-| ----------------------- | ----- | -------------------- |
-| `ErrnoAccessDenied`     | -6    | Token 过期或权限不足 |
-| `ErrnoFileNameIllegal`  | -7    | 文件名不合法         |
-| `ErrnoFileAlreadyExist` | -8    | 文件已存在           |
-| `ErrnoPathNotExist`     | -9    | 路径不存在           |
-| `ErrnoSpaceFull`        | -10   | 空间已满             |
-| `ErrnoParamError`       | 2     | 参数错误             |
-| `ErrnoLimitExceeded`    | 31034 | 频率超限             |
+| 常量                              | 值    | 含义                                  |
+| --------------------------------- | ----- | ------------------------------------- |
+| `ErrnoAccessDenied`               | -6    | 身份验证失败，可能与 Token 或权限有关 |
+| `ErrnoFileNameIllegal`            | -7    | 文件名不合法                          |
+| `ErrnoFileAlreadyExist`           | -8    | 文件已存在                            |
+| `ErrnoPathNotExist`               | -9    | 路径不存在                            |
+| `ErrnoSpaceFull`                  | -10   | 空间已满                              |
+| `ErrnoParamError`                 | 2     | 参数错误                              |
+| `ErrnoAccessTokenExpired`         | 20016 | access_token 已过期                   |
+| `ErrnoAccessTokenInvalid`         | 20017 | access_token 无效                     |
+| `ErrnoLimitExceeded`              | 31034 | 频率超限                              |
+| `ErrnoAccessTokenVerifyFailed`    | 31045 | access_token 验证未通过               |
 
 ## 客户端选项
 

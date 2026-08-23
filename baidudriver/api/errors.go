@@ -8,18 +8,21 @@ import (
 
 // Common errno values from Baidu API.
 const (
-	ErrnoSuccess          = 0
-	ErrnoUnknown          = -1
-	ErrnoAccessDenied     = -6
-	ErrnoFileNameIllegal  = -7
-	ErrnoFileAlreadyExist = -8
-	ErrnoPathNotExist     = -9
-	ErrnoSpaceFull        = -10
-	ErrnoParamError       = 2
-	ErrnoAsyncTaskRunning = 111
-	ErrnoLimitExceeded    = 31034
-	ErrnoHitBlacklist     = 31023
-	ErrnoSpaceNotEnough   = 31190
+	ErrnoSuccess                 = 0
+	ErrnoUnknown                 = -1
+	ErrnoAccessDenied            = -6
+	ErrnoFileNameIllegal         = -7
+	ErrnoFileAlreadyExist        = -8
+	ErrnoPathNotExist            = -9
+	ErrnoSpaceFull               = -10
+	ErrnoParamError              = 2
+	ErrnoAsyncTaskRunning        = 111
+	ErrnoAccessTokenExpired      = 20016
+	ErrnoAccessTokenInvalid      = 20017
+	ErrnoLimitExceeded           = 31034
+	ErrnoHitBlacklist            = 31023
+	ErrnoAccessTokenVerifyFailed = 31045
+	ErrnoSpaceNotEnough          = 31190
 	// ErrnoHTTPError 表示 HTTP 状态码异常但 JSON 中无业务错误码的兜底错误。
 	// 不与百度 API 的 errno 值域冲突。
 	ErrnoHTTPError = -9999
