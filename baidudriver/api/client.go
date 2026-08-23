@@ -137,14 +137,7 @@ func (c *Client) Do(ctx context.Context, req *http.Request, v any) (*http.Respon
 	req = req.WithContext(ctx)
 
 	if c.debug {
-		// Redact access_token from debug output
-		debugURL := *req.URL
-		q := debugURL.Query()
-		if q.Get("access_token") != "" {
-			q.Set("access_token", "***")
-			debugURL.RawQuery = q.Encode()
-		}
-		c.logf("%s %s", req.Method, debugURL.String())
+		c.logf("%s %s", req.Method, redactURL(req.URL))
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -163,12 +156,12 @@ func (c *Client) Do(ctx context.Context, req *http.Request, v any) (*http.Respon
 	}
 
 	if c.debug {
-		c.logf("Response [%d]: %s", resp.StatusCode, string(data))
+		c.logf("Response [%d]: %s", resp.StatusCode, redactResponseBody(data))
 	}
 
 	// 构建诊断信息：脱敏 URL + 响应体摘要
 	redactedURL := redactURL(req.URL)
-	respBodySummary := truncateBody(string(data), 1024)
+	respBodySummary := truncateBody(redactResponseBody(data), 1024)
 
 	// Check for API error
 	// 百度 API 有四种错误格式:
@@ -325,15 +318,54 @@ func (c *Client) doPostJSON(ctx context.Context, path string, params url.Values,
 	return c.Do(ctx, req, v)
 }
 
-// redactURL 返回脱敏后的 URL 字符串（access_token → "***"）。
+// redactURL 返回脱敏后的 URL 字符串。
 func redactURL(u *url.URL) string {
 	q := u.Query()
-	if q.Get("access_token") != "" {
-		q.Set("access_token", "***")
+	for _, key := range []string{"access_token", "refresh_token", "client_secret"} {
+		if q.Get(key) != "" {
+			q.Set(key, "***")
+		}
 	}
 	redacted := *u
 	redacted.RawQuery = q.Encode()
 	return redacted.String()
+}
+
+// redactResponseBody 脱敏 JSON 响应中的 OAuth 凭据。
+func redactResponseBody(data []byte) string {
+	var value any
+	if err := json.Unmarshal(data, &value); err != nil {
+		return string(data)
+	}
+	if !redactJSONCredentials(value) {
+		return string(data)
+	}
+	redacted, err := json.Marshal(value)
+	if err != nil {
+		return string(data)
+	}
+	return string(redacted)
+}
+
+func redactJSONCredentials(value any) bool {
+	redacted := false
+	switch value := value.(type) {
+	case map[string]any:
+		for key, child := range value {
+			switch key {
+			case "access_token", "refresh_token", "client_secret", "session_key", "session_secret":
+				value[key] = "***"
+				redacted = true
+			default:
+				redacted = redactJSONCredentials(child) || redacted
+			}
+		}
+	case []any:
+		for _, child := range value {
+			redacted = redactJSONCredentials(child) || redacted
+		}
+	}
+	return redacted
 }
 
 // truncateBody 截断响应体至 maxLen 字节，按 UTF-8 rune 边界对齐。
@@ -367,13 +399,7 @@ func (c *Client) doGetStream(ctx context.Context, fullURL string, userAgent stri
 	req.Header.Set("User-Agent", ua)
 
 	if c.debug {
-		debugURL := *req.URL
-		q := debugURL.Query()
-		if q.Get("access_token") != "" {
-			q.Set("access_token", "***")
-			debugURL.RawQuery = q.Encode()
-		}
-		c.logf("GET stream %s", debugURL.String())
+		c.logf("GET stream %s", redactURL(req.URL))
 	}
 
 	resp, err := c.httpClient.Do(req)

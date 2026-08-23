@@ -144,32 +144,54 @@ sc.MkdirIfNotExist(ctx, "/new_folder")
 
 ### Scene 方法一览
 
-| 方法 | 说明 |
-|------|------|
-| UserInfo | 获取用户基本信息 |
-| NasUserInfo | 用户信息 + IoT 权限（整合查询） |
-| Search | 语义搜索（自动获取 UK） |
-| ListDir | 目录文件列表 |
-| UploadFile | 一键上传（自动分片 + 重试） |
-| DownloadFile | 一键下载（自动获取 dlink + 重试） |
-| CopyFile, MoveFile, RenameFile | 文件操作（带前置检查） |
-| DeleteFile | 删除文件 |
-| MkdirIfNotExist | 创建文件夹（已存在则跳过） |
+| 方法                           | 说明                              |
+| ------------------------------ | --------------------------------- |
+| UserInfo                       | 获取用户基本信息                  |
+| NasUserInfo                    | 用户信息 + IoT 权限（整合查询）   |
+| Search                         | 语义搜索（自动获取 UK）           |
+| ListDir                        | 目录文件列表                      |
+| UploadFile                     | 一键上传（自动分片 + 重试）       |
+| DownloadFile                   | 一键下载（自动获取 dlink + 重试） |
+| CopyFile, MoveFile, RenameFile | 文件操作（带前置检查）            |
+| DeleteFile                     | 删除文件                          |
+| MkdirIfNotExist                | 创建文件夹（已存在则跳过）        |
 
 ## 认证 (Auth)
 
-使用 SDK 前需先通过 OAuth 获取 access_token。支持两种授权方式：
+使用 SDK 前需先通过 OAuth 获取 `access_token`。支持两种授权方式以及使用 `refresh_token` 刷新授权：
+
+1.  授权码模式
 
 ```go
 client := api.NewClient()
 
-// 1. 授权码模式
 token, _ := client.Auth.Code2Token(ctx, "app_key", "secret_key", "auth_code", "oob")
 
-// 2. 设备码模式（适用于 CLI）
+// 拿到 token 后创建带认证的客户端
+client = api.NewClient(api.WithAccessToken(token.AccessToken))
+```
+
+2.  设备码模式（适用于 CLI）
+
+```go
+client := api.NewClient()
+
 device, _ := client.Auth.DeviceCode(ctx, "app_key")
 // 用户扫码后...
 token, _ := client.Auth.DeviceToken(ctx, "app_key", "secret_key", device.DeviceCode)
+
+// 拿到 token 后创建带认证的客户端
+client = api.NewClient(api.WithAccessToken(token.AccessToken))
+```
+
+3.  刷新授权
+
+```go
+client := api.NewClient()
+
+// access_token 到期后，可以使用之前保存的 refresh_token 刷新
+// 刷新请求，如果 API 返回失败，旧的 refresh_token 会失效，此时需要重新发起授权请求，获取新的 access_token、refresh_token
+token, _ := client.Auth.RefreshToken(ctx, "app_key", "secret_key", "refresh_token")
 
 // 拿到 token 后创建带认证的客户端
 client = api.NewClient(api.WithAccessToken(token.AccessToken))
@@ -196,15 +218,15 @@ if err != nil {
 
 常用错误码常量：
 
-| 常量 | 值 | 含义 |
-|------|------|------|
-| `ErrnoAccessDenied` | -6 | Token 过期或权限不足 |
-| `ErrnoFileNameIllegal` | -7 | 文件名不合法 |
-| `ErrnoFileAlreadyExist` | -8 | 文件已存在 |
-| `ErrnoPathNotExist` | -9 | 路径不存在 |
-| `ErrnoSpaceFull` | -10 | 空间已满 |
-| `ErrnoParamError` | 2 | 参数错误 |
-| `ErrnoLimitExceeded` | 31034 | 频率超限 |
+| 常量                    | 值    | 含义                 |
+| ----------------------- | ----- | -------------------- |
+| `ErrnoAccessDenied`     | -6    | Token 过期或权限不足 |
+| `ErrnoFileNameIllegal`  | -7    | 文件名不合法         |
+| `ErrnoFileAlreadyExist` | -8    | 文件已存在           |
+| `ErrnoPathNotExist`     | -9    | 路径不存在           |
+| `ErrnoSpaceFull`        | -10   | 空间已满             |
+| `ErrnoParamError`       | 2     | 参数错误             |
+| `ErrnoLimitExceeded`    | 31034 | 频率超限             |
 
 ## 客户端选项
 
@@ -345,14 +367,14 @@ io.Copy(localFile, body)
 
 ### API 方法一览
 
-| Service | 方法 | 说明 |
-|---------|------|------|
-| Auth | Code2Token, DeviceCode, DeviceToken | OAuth 2.0 授权 |
-| Nas | UInfo, Quota, IoTQueryUInfo | 用户信息、容量、IoT 权限 |
-| File | List, UniSearch | 文件列表、语义搜索 |
-| FileManager | Copy, Move, Rename, Delete, Mkdir | 文件管理 |
-| Upload | Precreate, SliceUpload, CreateFile | 文件上传（三步） |
-| Download | Meta, Download | 文件下载（两步） |
+| Service     | 方法                                              | 说明                     |
+| ----------- | ------------------------------------------------- | ------------------------ |
+| Auth        | Code2Token, DeviceCode, DeviceToken, RefreshToken | OAuth 2.0 授权           |
+| Nas         | UInfo, Quota, IoTQueryUInfo                       | 用户信息、容量、IoT 权限 |
+| File        | List, UniSearch                                   | 文件列表、语义搜索       |
+| FileManager | Copy, Move, Rename, Delete, Mkdir                 | 文件管理                 |
+| Upload      | Precreate, SliceUpload, CreateFile                | 文件上传（三步）         |
+| Download    | Meta, Download                                    | 文件下载（两步）         |
 
 ## 示例
 
