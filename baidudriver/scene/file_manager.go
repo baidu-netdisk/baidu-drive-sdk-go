@@ -156,15 +156,17 @@ func (s *Scene) MkdirIfNotExist(ctx context.Context, dirPath string) error {
 
 // FileInfo 是目录列表返回的单个文件信息（业务简化版）。
 type FileInfo struct {
-	FsID     int64
-	Filename string
-	Path     string
-	IsDir    bool
-	Size     int64
-	Category int
-	Ctime    int64
-	Mtime    int64
-	MD5      string
+	FsID       int64
+	Filename   string
+	Path       string
+	IsDir      bool
+	Size       int64
+	Category   int
+	Ctime      int64
+	Mtime      int64
+	LocalCtime int64
+	LocalMtime int64
+	MD5        string
 }
 
 // ListDirOptions 是 ListDir 的可选参数。
@@ -223,15 +225,17 @@ func (s *Scene) ListDir(ctx context.Context, dir string, opts *ListDirOptions) (
 	files := make([]*FileInfo, 0, len(resp.List))
 	for _, f := range resp.List {
 		files = append(files, &FileInfo{
-			FsID:     f.FsID,
-			Filename: f.ServerFilename,
-			Path:     f.Path,
-			IsDir:    f.Isdir == 1,
-			Size:     f.Size,
-			Category: f.Category,
-			Ctime:    f.ServerCtime,
-			Mtime:    f.ServerMtime,
-			MD5:      f.MD5,
+			FsID:       f.FsID,
+			Filename:   f.ServerFilename,
+			Path:       f.Path,
+			IsDir:      f.Isdir == 1,
+			Size:       f.Size,
+			Category:   f.Category,
+			Ctime:      f.ServerCtime,
+			Mtime:      f.ServerMtime,
+			LocalCtime: f.LocalCtime,
+			LocalMtime: f.LocalMtime,
+			MD5:        f.MD5,
 		})
 	}
 	return files, nil

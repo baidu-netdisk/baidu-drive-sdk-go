@@ -82,6 +82,7 @@ func (s *Scene) UploadFile(ctx context.Context, params *UploadFileParams) (*Uplo
 		return nil, fmt.Errorf("scene: stat file: %w", err)
 	}
 	fileSize := fi.Size()
+	fileMTime := fi.ModTime().Unix()
 
 	// 计算分片 MD5 列表
 	blockMD5s, err := computeBlockMD5List(f, sliceSize)
@@ -94,10 +95,11 @@ func (s *Scene) UploadFile(ctx context.Context, params *UploadFileParams) (*Uplo
 	err = retry(ctx, defaultMaxRetries, func() error {
 		var e error
 		precreateResp, e = s.client.Upload.Precreate(ctx, &api.PrecreateParams{
-			Path:      params.RemotePath,
-			Size:      fileSize,
-			BlockList: blockMD5s,
-			RType:     params.RType,
+			Path:       params.RemotePath,
+			Size:       fileSize,
+			LocalMtime: &fileMTime,
+			BlockList:  blockMD5s,
+			RType:      params.RType,
 		})
 		return e
 	})
@@ -149,11 +151,12 @@ func (s *Scene) UploadFile(ctx context.Context, params *UploadFileParams) (*Uplo
 	err = retry(ctx, defaultMaxRetries, func() error {
 		var e error
 		createResp, e = s.client.Upload.CreateFile(ctx, &api.CreateFileParams{
-			Path:      params.RemotePath,
-			Size:      fileSize,
-			UploadID:  precreateResp.UploadID,
-			BlockList: sliceMD5s,
-			RType:     params.RType,
+			Path:       params.RemotePath,
+			Size:       fileSize,
+			LocalMtime: &fileMTime,
+			UploadID:   precreateResp.UploadID,
+			BlockList:  sliceMD5s,
+			RType:      params.RType,
 		})
 		return e
 	})

@@ -25,6 +25,7 @@ func TestUpload_Precreate_Success(t *testing.T) {
 
 		body, _ := io.ReadAll(r.Body)
 		bodyStr := string(body)
+		vals, _ := url.ParseQuery(bodyStr)
 
 		// 验证必填参数
 		if !strings.Contains(bodyStr, "path=%2Fapps%2Ftest%2Ffile.txt") {
@@ -38,6 +39,12 @@ func TestUpload_Precreate_Success(t *testing.T) {
 		}
 		if !strings.Contains(bodyStr, "autoinit=1") {
 			t.Errorf("body should contain autoinit=1, got: %s", bodyStr)
+		}
+		if vals.Has("local_ctime") {
+			t.Errorf("local_ctime should be omitted when unset, got %q", vals.Get("local_ctime"))
+		}
+		if vals.Has("local_mtime") {
+			t.Errorf("local_mtime should be omitted when unset, got %q", vals.Get("local_mtime"))
 		}
 
 		w.Write([]byte(`{
@@ -74,12 +81,19 @@ func TestUpload_Precreate_WithOptionalParams(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		bodyStr := string(body)
+		vals, _ := url.ParseQuery(bodyStr)
 
 		if !strings.Contains(bodyStr, "rtype=3") {
 			t.Errorf("body should contain rtype=3, got: %s", bodyStr)
 		}
 		if !strings.Contains(bodyStr, "is_revision=1") {
 			t.Errorf("body should contain is_revision=1, got: %s", bodyStr)
+		}
+		if vals.Get("local_ctime") != "1596009229" {
+			t.Errorf("local_ctime = %q, want 1596009229", vals.Get("local_ctime"))
+		}
+		if vals.Get("local_mtime") != "1596009230" {
+			t.Errorf("local_mtime = %q, want 1596009230", vals.Get("local_mtime"))
 		}
 
 		w.Write([]byte(`{
@@ -92,9 +106,13 @@ func TestUpload_Precreate_WithOptionalParams(t *testing.T) {
 	defer ts.Close()
 
 	c := NewClient(WithBaseURL(ts.URL))
+	ctime := int64(1596009229)
+	mtime := int64(1596009230)
 	resp, err := c.Upload.Precreate(ctx(), &PrecreateParams{
 		Path:       "/apps/test/file.txt",
 		Size:       2048,
+		LocalCtime: &ctime,
+		LocalMtime: &mtime,
 		BlockList:  []string{"abc123"},
 		RType:      Ptr(3),
 		IsRevision: Ptr(1),

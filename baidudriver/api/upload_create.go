@@ -23,6 +23,12 @@ type CreateFileParams struct {
 	// Size 文件或目录的大小（byte），必填。
 	Size int64
 
+	// LocalCtime 文件或目录的本地创建时间（unix 时间戳，选填，默认为当前时间）。
+	LocalCtime *int64
+
+	// LocalMtime 文件或目录的本地修改时间（unix 时间戳，选填，默认为当前时间）。
+	LocalMtime *int64
+
 	// UploadID 预创建返回的 uploadid（必填）。
 	UploadID string
 
@@ -111,6 +117,13 @@ func (s *UploadService) CreateFile(ctx context.Context, params *CreateFileParams
 	body.Set("path", params.Path)
 	body.Set("size", strconv.FormatInt(params.Size, 10))
 	body.Set("uploadid", params.UploadID)
+
+	if params.LocalMtime != nil {
+		body.Set("local_mtime", strconv.FormatInt(*params.LocalMtime, 10))
+	}
+	if params.LocalCtime != nil {
+		body.Set("local_ctime", strconv.FormatInt(*params.LocalCtime, 10))
+	}
 
 	isdir := 0
 	if params.IsDir != nil {

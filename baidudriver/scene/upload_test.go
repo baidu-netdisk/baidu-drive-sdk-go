@@ -22,17 +22,28 @@ func TestUploadFile_Success_SmallFile(t *testing.T) {
 	content := []byte("hello, upload test!")
 	tmpFile := writeTempFile(t, content)
 	defer os.Remove(tmpFile)
+	fileMtime := time.Unix(1596009230, 0)
+	if err := os.Chtimes(tmpFile, fileMtime, fileMtime); err != nil {
+		t.Fatalf("set file times: %v", err)
+	}
 
 	h := md5.Sum(content)
 	contentMD5 := hex.EncodeToString(h[:])
 
 	callOrder := []string{}
+	localMtimes := []string{}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		method := r.URL.Query().Get("method")
 		switch method {
 		case "precreate":
 			callOrder = append(callOrder, "precreate")
+			if err := r.ParseForm(); err != nil {
+				t.Errorf("parse precreate form: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			localMtimes = append(localMtimes, r.Form.Get("local_mtime"))
 			w.Write([]byte(fmt.Sprintf(`{
 				"errno": 0,
 				"uploadid": "test-upload-id",
@@ -47,6 +58,12 @@ func TestUploadFile_Success_SmallFile(t *testing.T) {
 			}`, contentMD5)))
 		case "create":
 			callOrder = append(callOrder, "create")
+			if err := r.ParseForm(); err != nil {
+				t.Errorf("parse create form: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			localMtimes = append(localMtimes, r.Form.Get("local_mtime"))
 			w.Write([]byte(fmt.Sprintf(`{
 				"errno": 0,
 				"fs_id": 12345,
@@ -89,6 +106,14 @@ func TestUploadFile_Success_SmallFile(t *testing.T) {
 	for i, v := range expected {
 		if callOrder[i] != v {
 			t.Errorf("callOrder[%d] = %q, want %q", i, callOrder[i], v)
+		}
+	}
+	if len(localMtimes) != 2 {
+		t.Fatalf("local_mtime count = %d, want 2", len(localMtimes))
+	}
+	for i, got := range localMtimes {
+		if got != "1596009230" {
+			t.Errorf("local_mtime[%d] = %q, want 1596009230", i, got)
 		}
 	}
 }

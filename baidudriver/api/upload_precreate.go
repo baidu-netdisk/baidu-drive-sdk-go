@@ -23,6 +23,12 @@ type PrecreateParams struct {
 	// Size 文件或目录的大小（byte），必填。
 	Size int64
 
+	// LocalCtime 文件或目录的本地创建时间（unix 时间戳，选填，默认为当前时间）。
+	LocalCtime *int64
+
+	// LocalMtime 文件或目录的本地修改时间（unix 时间戳，选填，默认为当前时间）。
+	LocalMtime *int64
+
 	// BlockList 文件各分片 MD5 数组（必填）。
 	// 文件被分为固定大小的分片后，对每个分片计算 MD5。
 	BlockList []string
@@ -95,8 +101,15 @@ func (s *UploadService) Precreate(ctx context.Context, params *PrecreateParams) 
 	body.Set("path", params.Path)
 	body.Set("size", strconv.FormatInt(params.Size, 10))
 	body.Set("autoinit", "1")
+
 	if params.Autoinit != nil {
 		body.Set("autoinit", strconv.Itoa(*params.Autoinit))
+	}
+	if params.LocalMtime != nil {
+		body.Set("local_mtime", strconv.FormatInt(*params.LocalMtime, 10))
+	}
+	if params.LocalCtime != nil {
+		body.Set("local_ctime", strconv.FormatInt(*params.LocalCtime, 10))
 	}
 
 	isdir := 0
