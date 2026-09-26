@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 )
@@ -46,6 +47,11 @@ func TestIsErrno(t *testing.T) {
 
 	if IsErrno(errors.New("other error"), -6) {
 		t.Error("IsErrno should return false for non-APIError")
+	}
+
+	wrapped := fmt.Errorf("list files: %w", &APIError{Errno: 20016})
+	if !IsErrno(wrapped, 20016) {
+		t.Error("IsErrno should return true for a wrapped APIError with matching errno")
 	}
 }
 

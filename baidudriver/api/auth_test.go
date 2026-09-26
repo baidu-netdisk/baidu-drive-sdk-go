@@ -1,10 +1,13 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -221,6 +224,165 @@ func TestAuthService_Code2Token_EmptyParams(t *testing.T) {
 				t.Fatal("expected error for empty param")
 			}
 		})
+	}
+}
+
+func TestAuthService_RefreshToken(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %q, want GET", r.Method)
+		}
+		if r.URL.Path != "/oauth/2.0/token" {
+			t.Errorf("path = %q, want /oauth/2.0/token", r.URL.Path)
+		}
+		q := r.URL.Query()
+		if q.Get("grant_type") != "refresh_token" {
+			t.Errorf("grant_type = %q, want refresh_token", q.Get("grant_type"))
+		}
+		if q.Get("refresh_token") != "old_refresh_token" {
+			t.Errorf("refresh_token = %q, want old_refresh_token", q.Get("refresh_token"))
+		}
+		if q.Get("client_id") != "test_app_key" {
+			t.Errorf("client_id = %q, want test_app_key", q.Get("client_id"))
+		}
+		if q.Get("client_secret") != "test_secret" {
+			t.Errorf("client_secret = %q, want test_secret", q.Get("client_secret"))
+		}
+		w.Write([]byte(`{
+			"access_token": "new_access_token",
+			"expires_in": 2592000,
+			"refresh_token": "new_refresh_token",
+			"scope": "basic netdisk",
+			"session_key": "session_key",
+			"session_secret": "session_secret"
+		}`))
+	}))
+	defer ts.Close()
+
+	c := newOAuthTestClient(ts.URL)
+	resp, err := c.Auth.RefreshToken(context.Background(), "test_app_key", "test_secret", "old_refresh_token")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.AccessToken != "new_access_token" {
+		t.Errorf("AccessToken = %q, want new_access_token", resp.AccessToken)
+	}
+	if resp.ExpiresIn != 2592000 {
+		t.Errorf("ExpiresIn = %d, want 2592000", resp.ExpiresIn)
+	}
+	if resp.RefreshToken != "new_refresh_token" {
+		t.Errorf("RefreshToken = %q, want new_refresh_token", resp.RefreshToken)
+	}
+	if resp.Scope != "basic netdisk" {
+		t.Errorf("Scope = %q, want basic netdisk", resp.Scope)
+	}
+	if resp.SessionKey != "session_key" {
+		t.Errorf("SessionKey = %q, want session_key", resp.SessionKey)
+	}
+	if resp.SessionSecret != "session_secret" {
+		t.Errorf("SessionSecret = %q, want session_secret", resp.SessionSecret)
+	}
+}
+
+func TestAuthService_RefreshToken_EmptyParams(t *testing.T) {
+	c := NewClient()
+	tests := []struct {
+		name         string
+		appKey       string
+		secretKey    string
+		refreshToken string
+	}{
+		{"empty appKey", "", "secret", "refresh"},
+		{"empty secretKey", "key", "", "refresh"},
+		{"empty refreshToken", "key", "secret", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := c.Auth.RefreshToken(context.Background(), tt.appKey, tt.secretKey, tt.refreshToken)
+			if err == nil {
+				t.Fatal("expected error for empty param")
+			}
+		})
+	}
+}
+
+func TestAuthService_RefreshToken_APIError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"error":"invalid_grant","error_description":"refresh token expired"}`))
+	}))
+	defer ts.Close()
+
+	c := NewClient(WithBaseURL(ts.URL))
+	_, err := c.Auth.RefreshToken(context.Background(), "key", "secret", "expired_refresh_token")
+	if err == nil {
+		t.Fatal("expected error for expired refresh token")
+	}
+	if !IsErrno(err, ErrnoUnknown) {
+		t.Errorf("expected errno=%d, got: %v", ErrnoUnknown, err)
+	}
+}
+
+func TestAuthService_RefreshToken_RedactsCredentialsFromDiagnostics(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"error":"invalid_grant","error_description":"refresh token expired"}`))
+	}))
+	defer ts.Close()
+
+	var logs bytes.Buffer
+	c := NewClient(WithBaseURL(ts.URL), WithDebug(true), WithLogger(&logs))
+	_, err := c.Auth.RefreshToken(context.Background(), "key", "secret_value", "refresh_value")
+	if err == nil {
+		t.Fatal("expected error for expired refresh token")
+	}
+
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *APIError, got %T", err)
+	}
+	diagnosticURL, parseErr := url.Parse(apiErr.URL)
+	if parseErr != nil {
+		t.Fatalf("parse APIError.URL: %v", parseErr)
+	}
+	if got := diagnosticURL.Query().Get("refresh_token"); got != "***" {
+		t.Errorf("APIError.URL refresh_token = %q, want redacted", got)
+	}
+	if got := diagnosticURL.Query().Get("client_secret"); got != "***" {
+		t.Errorf("APIError.URL client_secret = %q, want redacted", got)
+	}
+	if strings.Contains(logs.String(), "refresh_value") || strings.Contains(logs.String(), "secret_value") {
+		t.Errorf("debug log contains OAuth credentials: %q", logs.String())
+	}
+}
+
+func TestAuthService_RefreshToken_RedactsCredentialsFromSuccessLog(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{
+			"access_token":"access_value",
+			"refresh_token":"new_refresh_value",
+			"session_key":"session_key_value",
+			"session_secret":"session_secret_value"
+		}`))
+	}))
+	defer ts.Close()
+
+	var logs bytes.Buffer
+	c := NewClient(WithBaseURL(ts.URL), WithDebug(true), WithLogger(&logs))
+	_, err := c.Auth.RefreshToken(context.Background(), "key", "client_secret_value", "old_refresh_value")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, credential := range []string{
+		"access_value",
+		"new_refresh_value",
+		"session_key_value",
+		"session_secret_value",
+		"client_secret_value",
+		"old_refresh_value",
+	} {
+		if strings.Contains(logs.String(), credential) {
+			t.Errorf("debug log contains credential %q: %q", credential, logs.String())
+		}
 	}
 }
 
