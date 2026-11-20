@@ -25,8 +25,8 @@ type Scene struct {
 //
 // 示例:
 //
-//	client := api.NewClient(api.WithAccessToken("your_token"))
-//	sc := scene.New(client)
+//	// result 由 auth.Begin 和 Session.Wait 返回。
+//	sc := scene.New(result.Client)
 func New(client *api.Client) *Scene {
 	return &Scene{client: client}
 }

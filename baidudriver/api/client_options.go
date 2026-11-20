@@ -9,8 +9,10 @@ import (
 // Option configures a Client.
 type Option func(*Client)
 
-// WithAccessToken sets the access token for API authentication.
-// The token is injected as a query parameter via a custom Transport.
+// WithAccessToken is the low-level token injection used by auth.Result.Client.
+// Developer authorization should use auth.Begin and Session.Wait instead of
+// calling this option directly. The token is injected as a query parameter via
+// a custom Transport.
 func WithAccessToken(token string) Option {
 	return func(c *Client) {
 		c.accessToken = token
@@ -61,4 +63,3 @@ func WithAPIKey(key string) Option {
 		c.apiKey = key
 	}
 }
-

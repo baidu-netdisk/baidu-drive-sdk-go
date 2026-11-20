@@ -8,11 +8,11 @@ import (
 	"github.com/baidu-netdisk/baidu-drive-sdk-go/baidudriver/api"
 )
 
-func TestRun_MissingToken(t *testing.T) {
+func TestRun_MissingCredentials(t *testing.T) {
 	getenv := func(string) string { return "" }
 	err := run(getenv, []string{"cmd"})
 	if err == nil {
-		t.Fatal("expected error for missing token")
+		t.Fatal("expected error for missing application credentials")
 	}
 }
 
@@ -28,7 +28,7 @@ func TestRun_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	// run() 内部用 WithAccessToken 创建客户端，无法指向 mock server，
+	// run() 内部会进入 directory OAuth，无法指向 mock server，
 	// 所以直接测试 runWithClient。
 	client := api.NewClient(api.WithBaseURL(ts.URL))
 	if err := runWithClient(client); err != nil {

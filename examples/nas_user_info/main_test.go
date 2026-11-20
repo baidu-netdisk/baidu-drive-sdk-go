@@ -24,16 +24,16 @@ func newRouterServer(t *testing.T, handlers map[string]http.HandlerFunc) *httpte
 	}))
 }
 
-func TestRun_MissingToken(t *testing.T) {
+func TestRun_MissingCredentials(t *testing.T) {
 	getenv := func(string) string { return "" }
 	err := run(getenv, []string{"cmd"})
 	if err == nil {
-		t.Fatal("expected error for missing token")
+		t.Fatal("expected error for missing application credentials")
 	}
 }
 
 func TestRun_MissingDeviceID(t *testing.T) {
-	getenv := func(string) string { return "fake_token" }
+	getenv := func(string) string { return "configured" }
 	err := run(getenv, []string{"cmd"})
 	if err == nil {
 		t.Fatal("expected error for missing device_id")

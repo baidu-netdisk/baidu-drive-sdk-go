@@ -1,12 +1,8 @@
 // 网盘容量查询示例
 //
 // 使用方式:
-//   1. 设置环境变量: export BAIDU_ACCESS_TOKEN=your_access_token
-//   2. 运行: go run main.go
-//
-// 获取 access_token 的方式:
-//   - 参考 examples/auth/main.go 进行 OAuth2 授权
-//   - 或在百度网盘开放平台获取: https://pan.baidu.com/union
+//   1. 设置 BAIDU_APP_KEY、BAIDU_SECRET_KEY、BAIDU_REDIRECT_URI
+//   2. 运行: go run ./examples/quota
 
 package main
 
@@ -16,6 +12,7 @@ import (
 	"os"
 
 	"github.com/baidu-netdisk/baidu-drive-sdk-go/baidudriver/api"
+	"github.com/baidu-netdisk/baidu-drive-sdk-go/examples/internal/authclient"
 )
 
 func main() {
@@ -26,13 +23,10 @@ func main() {
 }
 
 func run(getenv func(string) string, args []string) error {
-	accessToken := getenv("BAIDU_ACCESS_TOKEN")
-	if accessToken == "" {
-		return fmt.Errorf("错误: 请设置 BAIDU_ACCESS_TOKEN 环境变量\n示例: export BAIDU_ACCESS_TOKEN=your_access_token")
+	client, err := authclient.New(context.Background(), getenv, os.Stdout)
+	if err != nil {
+		return err
 	}
-
-	// 创建客户端
-	client := api.NewClient(api.WithAccessToken(accessToken))
 
 	return runWithClient(client)
 }

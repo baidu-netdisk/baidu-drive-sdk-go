@@ -227,7 +227,7 @@ func TestScene_MoveFile_ListError(t *testing.T) {
 func TestScene_RenameFile(t *testing.T) {
 	oldFile := `[{"fs_id":3,"path":"/test/old.txt","server_filename":"old.txt","size":100,"server_mtime":1,"server_ctime":1,"local_mtime":1,"local_ctime":1,"isdir":0,"category":4,"md5":"abc"}]`
 	ts, sc := newRouterScene(t, map[string]http.HandlerFunc{
-		"/rest/2.0/xpan/file?list":                    listHandler(oldFile),
+		"/rest/2.0/xpan/file?list":                     listHandler(oldFile),
 		"/rest/2.0/xpan/file?filemanager&opera=rename": manageOKHandler(),
 	})
 	defer ts.Close()
@@ -743,7 +743,7 @@ func TestScene_MoveFile_MoveAPIError(t *testing.T) {
 func TestScene_RenameFile_RenameAPIError(t *testing.T) {
 	oldFile := `[{"fs_id":3,"path":"/test/old.txt","server_filename":"old.txt","size":100,"server_mtime":1,"server_ctime":1,"local_mtime":1,"local_ctime":1,"isdir":0,"category":4,"md5":"abc"}]`
 	ts, sc := newRouterScene(t, map[string]http.HandlerFunc{
-		"/rest/2.0/xpan/file?list":                    listHandler(oldFile),
+		"/rest/2.0/xpan/file?list": listHandler(oldFile),
 		"/rest/2.0/xpan/file?filemanager&opera=rename": func(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte(`{"errno":-9,"errmsg":"path not found"}`))
 		},

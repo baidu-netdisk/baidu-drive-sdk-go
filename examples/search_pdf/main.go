@@ -2,12 +2,14 @@
 //
 // 使用方式:
 //
-//	BAIDU_ACCESS_TOKEN=xxx go run examples/search_pdf/main.go [query] [dir]
+//	BAIDU_APP_KEY=xxx BAIDU_SECRET_KEY=yyy \
+//	BAIDU_REDIRECT_URI=http://127.0.0.1:8787/oauth/callback \
+//	go run ./examples/search_pdf [query] [dir]
 //
 // 示例:
 //
-//	BAIDU_ACCESS_TOKEN=xxx go run examples/search_pdf/main.go "合同" /
-//	BAIDU_ACCESS_TOKEN=xxx go run examples/search_pdf/main.go "报告"
+//	go run ./examples/search_pdf "合同" /
+//	go run ./examples/search_pdf "报告"
 package main
 
 import (
@@ -17,26 +19,21 @@ import (
 	"time"
 
 	"github.com/baidu-netdisk/baidu-drive-sdk-go/baidudriver/api"
+	"github.com/baidu-netdisk/baidu-drive-sdk-go/examples/internal/authclient"
 )
 
 func main() {
-	token := os.Getenv("BAIDU_ACCESS_TOKEN")
-	if token == "" {
-		fmt.Fprintln(os.Stderr, "请设置环境变量 BAIDU_ACCESS_TOKEN")
-		fmt.Fprintln(os.Stderr, "用法: BAIDU_ACCESS_TOKEN=xxx go run examples/search_pdf/main.go [query] [dir]")
-		os.Exit(1)
-	}
-
 	query := "pdf"
 	if len(os.Args) > 1 {
 		query = os.Args[1]
 	}
 
-	c := api.NewClient(
-		api.WithAccessToken(token),
-		api.WithDebug(true),
-	)
 	ctx := context.Background()
+	c, err := authclient.New(ctx, os.Getenv, os.Stdout, api.WithDebug(true))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	// 构建 dirs 参数：需要 uk + path
 	dirs := buildDirs(ctx, c, os.Args)

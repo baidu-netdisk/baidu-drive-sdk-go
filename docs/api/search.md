@@ -25,27 +25,55 @@ api 层   — 1:1 对齐官方 HTTP 接口（本文档）
 
 ## 初始化
 
-```go
-import "github.com/baidu-netdisk/baidu-drive-sdk-go/baidudriver/api"
+开发者通过唯一的 directory loopback OAuth 获取客户端。先在开发者控制台登记与 `RedirectURI` 完全一致的 loopback 地址，然后只调用 `auth.Begin` 和 `Session.Wait`：
 
-client := api.NewClient(
-    api.WithAccessToken("your_token"),
-    // api.WithDebug(true),       // 开启调试日志
-    // api.WithBaseURL("..."),    // 自定义 base URL
-    // api.WithHTTPClient(hc),    // 自定义 HTTP client
-    // api.WithLogger(os.Stderr), // 自定义日志输出
+```go
+import (
+    "fmt"
+    "os"
+
+    "github.com/baidu-netdisk/baidu-drive-sdk-go/baidudriver/api"
+    "github.com/baidu-netdisk/baidu-drive-sdk-go/baidudriver/auth"
 )
+
+session, err := auth.Begin(ctx, auth.Config{
+    AppKey:      os.Getenv("BAIDU_APP_KEY"),
+    SecretKey:   os.Getenv("BAIDU_SECRET_KEY"),
+    RedirectURI: "http://127.0.0.1:8787/oauth/callback",
+    OpenBrowser: true,
+    ClientOptions: []api.Option{
+        api.WithDebug(true),
+    },
+})
+if err != nil {
+    return err
+}
+
+// SDK 会在 listener 就绪后请求系统浏览器打开授权页；失败时保留 URL。
+if session.BrowserOpenError != nil {
+    fmt.Println(session.AuthorizationURL)
+}
+
+result, err := session.Wait(ctx)
+if err != nil {
+    return err
+}
+client := result.Client
 ```
+
+默认授权端点为 `https://pan.baidu.com/union/oauth/authorize`，换 token 端点为 `GET https://pan.baidu.com/xpan/oauth/get?method=token`；换 token 时会再次提交同一个 `state`，成功响应的凭证字段位于根对象的 `data` 中。`auth` 包负责外部浏览器拉起、PKCE S256、`state`、loopback 回调、防重放、token 交换和系统钥匙串持久化，并分别保存申请 scope 与 `data.scope` 返回的实际授权 scope。它当前不自动刷新 token，过期后应重新执行上述两个调用。百度换 token 仍使用敏感查询参数的 `GET`，且服务端是否强制 PKCE 未核实，所以该流程是 OAuth 2.1-ready 基线而非完整合规声明。
 
 ### Client Options
 
 | Option | 说明 |
 |--------|------|
-| `WithAccessToken(token)` | 设置 access_token（通过 Transport 自动注入） |
+| `WithAccessToken(token)` | 底层 token 注入；`auth.Result.Client` 内部使用，常规开发者接入不要用它替代授权流程 |
 | `WithBaseURL(url)` | 自定义 base URL（默认 `https://pan.baidu.com`） |
 | `WithHTTPClient(hc)` | 自定义 `*http.Client` |
 | `WithDebug(true)` | 开启请求/响应调试日志 |
 | `WithLogger(w)` | 自定义日志 Writer |
+
+需要这些选项时通过 `auth.Config.ClientOptions` 传入，由 `Session.Wait` 构造最终客户端。默认凭证存储是 macOS Keychain、Windows Credential Manager 或 Linux Secret Service；SDK 不会静默回退到明文文件。
 
 ---
 

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -42,7 +43,6 @@ type Client struct {
 
 	File        *FileService
 	FileManager *FileManagerService
-	Auth        *AuthService
 	Nas         *NasService
 	Upload      *UploadService
 	Download    *DownloadService
@@ -80,9 +80,9 @@ func NewClient(opts ...Option) *Client {
 		panic("baidupan: invalid PCS base URL: " + err.Error())
 	}
 
-	// Set up HTTP client with token transport
+	// Set up HTTP client with authentication transports.
 	if c.httpClient == nil {
-		c.httpClient = &http.Client{}
+		c.httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
 	if c.accessToken != "" {
 		transport := c.httpClient.Transport
@@ -108,7 +108,6 @@ func NewClient(opts ...Option) *Client {
 	c.common.client = c
 	c.File = (*FileService)(&c.common)
 	c.FileManager = (*FileManagerService)(&c.common)
-	c.Auth = (*AuthService)(&c.common)
 	c.Nas = (*NasService)(&c.common)
 	c.Upload = (*UploadService)(&c.common)
 	c.Download = (*DownloadService)(&c.common)
@@ -156,12 +155,13 @@ func (c *Client) Do(ctx context.Context, req *http.Request, v any) (*http.Respon
 	}
 
 	if c.debug {
-		c.logf("Response [%d]: %s", resp.StatusCode, redactResponseBody(data))
+		c.logf("Response [%d]: %s", resp.StatusCode, redactJSON(data))
 	}
 
 	// 构建诊断信息：脱敏 URL + 响应体摘要
 	redactedURL := redactURL(req.URL)
-	respBodySummary := truncateBody(redactResponseBody(data), 1024)
+	redactedBody := redactJSON(data)
+	respBodySummary := truncateBody(redactedBody, 1024)
 
 	// Check for API error
 	// 百度 API 有四种错误格式:
@@ -170,13 +170,15 @@ func (c *Client) Do(ctx context.Context, req *http.Request, v any) (*http.Respon
 	//   3. {"error": "invalid_client", "error_description": "..."}  — OAuth 2.0
 	//   4. {"error_no": -6, "error_msg": "..."}     — /xpan/unisearch 等接口
 	var errResp struct {
-		Errno            int    `json:"errno"`
-		Errmsg           string `json:"errmsg"`
-		ErrorCode        int    `json:"error_code"`
-		ErrorMsg         string `json:"error_msg"`
-		Error            string `json:"error"`
-		ErrorDescription string `json:"error_description"`
-		ErrorNo          int    `json:"error_no"`
+		Errno            int             `json:"errno"`
+		Errmsg           string          `json:"errmsg"`
+		ErrorCode        int             `json:"error_code"`
+		ErrorMsg         string          `json:"error_msg"`
+		Error            string          `json:"error"`
+		ErrorDescription string          `json:"error_description"`
+		ErrorNo          int             `json:"error_no"`
+		ShowMsg          string          `json:"show_msg"`
+		RequestID        json.RawMessage `json:"request_id"`
 	}
 	if err := json.Unmarshal(data, &errResp); err == nil {
 		// OAuth 2.0 错误格式: {"error":"invalid_client","error_description":"..."}
@@ -188,6 +190,7 @@ func (c *Client) Do(ctx context.Context, req *http.Request, v any) (*http.Respon
 				Method:       req.Method,
 				URL:          redactedURL,
 				ResponseBody: respBodySummary,
+				RequestID:    rawJSONText(errResp.RequestID),
 			}
 		}
 		errno := errResp.Errno
@@ -203,9 +206,13 @@ func (c *Client) Do(ctx context.Context, req *http.Request, v any) (*http.Respon
 			if msg == "" {
 				msg = errResp.ErrorMsg
 			}
+			if msg == "" {
+				msg = errResp.ShowMsg
+			}
 			return resp, &APIError{
 				Errno:        errno,
 				Errmsg:       msg,
+				RequestID:    rawJSONText(errResp.RequestID),
 				Response:     resp,
 				Method:       req.Method,
 				URL:          redactedURL,
@@ -217,7 +224,7 @@ func (c *Client) Do(ctx context.Context, req *http.Request, v any) (*http.Respon
 	// HTTP 非 2xx 兜底：如果 JSON 错误字段全为零值但 HTTP 状态码异常，
 	// 将响应体内容包含在错误中，方便业务排查问题。
 	if resp.StatusCode >= 400 {
-		body := truncateBody(string(data), 512)
+		body := truncateBody(redactedBody, 512)
 		return resp, &APIError{
 			Errno:        ErrnoHTTPError,
 			Errmsg:       fmt.Sprintf("HTTP %d: %s", resp.StatusCode, body),
@@ -275,7 +282,7 @@ func (c *Client) doPostTo(ctx context.Context, base *url.URL, path string, param
 		bodyStr = body.Encode()
 	}
 	if c.debug {
-		c.logf("Request body: %s", bodyStr)
+		c.logf("Request body: %s", redactForm(body))
 	}
 
 	req, err := http.NewRequest(http.MethodPost, u.String(), strings.NewReader(bodyStr))
@@ -305,7 +312,7 @@ func (c *Client) doPostJSON(ctx context.Context, path string, params url.Values,
 	}
 
 	if c.debug {
-		c.logf("Request body: %s", string(jsonData))
+		c.logf("Request body: %s", redactJSON(jsonData))
 	}
 
 	req, err := http.NewRequest(http.MethodPost, u.String(), bytes.NewReader(jsonData))
@@ -318,11 +325,25 @@ func (c *Client) doPostJSON(ctx context.Context, path string, params url.Values,
 	return c.Do(ctx, req, v)
 }
 
-// redactURL 返回脱敏后的 URL 字符串。
+var sensitiveParameterNames = map[string]bool{
+	"access_token":   true,
+	"refresh_token":  true,
+	"client_secret":  true,
+	"code":           true,
+	"code_verifier":  true,
+	"device_code":    true,
+	"session_secret": true,
+}
+
+// redactURL returns a URL with OAuth credentials removed from its query.
+// redactURL 返回脱敏后的 URL 字符串（access_token 等敏感参数 → "***"）。
 func redactURL(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
 	q := u.Query()
-	for _, key := range []string{"access_token", "refresh_token", "client_secret"} {
-		if q.Get(key) != "" {
+	for key := range q {
+		if sensitiveParameterNames[strings.ToLower(key)] {
 			q.Set(key, "***")
 		}
 	}
@@ -331,15 +352,14 @@ func redactURL(u *url.URL) string {
 	return redacted.String()
 }
 
-// redactResponseBody 脱敏 JSON 响应中的 OAuth 凭据。
-func redactResponseBody(data []byte) string {
+func redactJSON(data []byte) string {
 	var value any
-	if err := json.Unmarshal(data, &value); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
 		return string(data)
 	}
-	if !redactJSONCredentials(value) {
-		return string(data)
-	}
+	redactJSONValue(value)
 	redacted, err := json.Marshal(value)
 	if err != nil {
 		return string(data)
@@ -347,25 +367,52 @@ func redactResponseBody(data []byte) string {
 	return string(redacted)
 }
 
-func redactJSONCredentials(value any) bool {
-	redacted := false
-	switch value := value.(type) {
-	case map[string]any:
-		for key, child := range value {
-			switch key {
-			case "access_token", "refresh_token", "client_secret", "session_key", "session_secret":
-				value[key] = "***"
-				redacted = true
-			default:
-				redacted = redactJSONCredentials(child) || redacted
-			}
-		}
-	case []any:
-		for _, child := range value {
-			redacted = redactJSONCredentials(child) || redacted
+func redactForm(values url.Values) string {
+	if values == nil {
+		return ""
+	}
+	redacted := make(url.Values, len(values))
+	for key, items := range values {
+		redacted[key] = append([]string(nil), items...)
+		if sensitiveParameterNames[strings.ToLower(key)] {
+			redacted[key] = []string{"***"}
 		}
 	}
-	return redacted
+	return redacted.Encode()
+}
+
+func redactJSONValue(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			if sensitiveParameterNames[strings.ToLower(key)] {
+				typed[key] = "***"
+				continue
+			}
+			if text, ok := child.(string); ok {
+				if parsed, err := url.Parse(text); err == nil && parsed.RawQuery != "" {
+					typed[key] = redactURL(parsed)
+					continue
+				}
+			}
+			redactJSONValue(child)
+		}
+	case []any:
+		for _, child := range typed {
+			redactJSONValue(child)
+		}
+	}
+}
+
+func rawJSONText(value json.RawMessage) string {
+	if len(value) == 0 || string(value) == "null" {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(value, &text) == nil {
+		return text
+	}
+	return strings.TrimSpace(string(value))
 }
 
 // truncateBody 截断响应体至 maxLen 字节，按 UTF-8 rune 边界对齐。
@@ -464,7 +511,7 @@ func (c *Client) doPostMultipart(ctx context.Context, base *url.URL, path string
 	req.Header.Set("User-Agent", c.userAgent)
 
 	if c.debug {
-		c.logf("Multipart upload: %s %s field=%s file=%s size=%d", req.Method, u.String(), fieldName, fileName, req.ContentLength)
+		c.logf("Multipart upload: %s %s field=%s file=%s size=%d", req.Method, redactURL(u), fieldName, fileName, req.ContentLength)
 	}
 
 	return c.Do(ctx, req, v)

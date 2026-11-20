@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // =============================================================================
@@ -91,6 +92,9 @@ type UniSearchFileInfo struct {
 
 	// Size 文件大小（byte）。
 	Size int64 `json:"size"`
+
+	// PID 语义向量召回的文本段落 ID。
+	PID int64 `json:"pid,omitempty"`
 }
 
 // UniSearchDataGroup 是 UniSearch 返回的搜索结果分组。
@@ -170,17 +174,43 @@ func (s *FileService) UniSearch(ctx context.Context, params *UniSearchParams) (*
 	if params == nil {
 		return nil, fmt.Errorf("baidupan: UniSearch params must not be nil")
 	}
-	if params.Query == "" {
+	if strings.TrimSpace(params.Query) == "" {
 		return nil, fmt.Errorf("baidupan: UniSearch query must not be empty")
 	}
-	if params.Scene == "" {
-		params.Scene = "mcpserver"
+	scene := params.Scene
+	if scene == "" {
+		scene = "mcpserver"
+	}
+	if scene != "mcpserver" {
+		return nil, fmt.Errorf("baidupan: UniSearch scene must be mcpserver")
+	}
+	if params.Num != nil && (*params.Num < 1 || *params.Num > 500) {
+		return nil, fmt.Errorf("baidupan: UniSearch num must be between 1 and 500")
+	}
+	if err := validateBinaryFlag("stream", params.Stream); err != nil {
+		return nil, err
+	}
+	if params.SearchType != nil && (*params.SearchType < 0 || *params.SearchType > 2) {
+		return nil, fmt.Errorf("baidupan: UniSearch search_type must be 0, 1, or 2")
+	}
+	for _, category := range params.Category {
+		if err := validateCategory(category); err != nil {
+			return nil, err
+		}
+	}
+	for i, dir := range params.Dirs {
+		if dir.UK <= 0 {
+			return nil, fmt.Errorf("baidupan: UniSearch dirs[%d].uk must be positive", i)
+		}
+		if dir.Path == "" || !strings.HasPrefix(dir.Path, "/") {
+			return nil, fmt.Errorf("baidupan: UniSearch dirs[%d].path must be an absolute path", i)
+		}
 	}
 
 	// 参数放在 URL query string 中
 	q := url.Values{}
 	q.Set("query", params.Query)
-	q.Set("scene", params.Scene)
+	q.Set("scene", scene)
 	// 服务端要求 dirs 参数使用 JSON 对象数组格式（如 [{"uk":123,"path":"/test"}]）。
 	if len(params.Dirs) > 0 {
 		dirsJSON, _ := json.Marshal(params.Dirs)

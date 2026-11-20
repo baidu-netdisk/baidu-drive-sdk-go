@@ -309,4 +309,3 @@ func TestDownload_Download_TokenInjected(t *testing.T) {
 	}
 	body.Close()
 }
-

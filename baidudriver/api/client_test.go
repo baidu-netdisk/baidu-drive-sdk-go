@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,9 +27,6 @@ func TestNewClient_Defaults(t *testing.T) {
 	}
 	if c.FileManager == nil {
 		t.Error("FileManager service should not be nil")
-	}
-	if c.Auth == nil {
-		t.Error("Auth service should not be nil")
 	}
 	if c.Nas == nil {
 		t.Error("Nas service should not be nil")
@@ -325,12 +323,15 @@ func TestClient_doPostJSON_DebugBody(t *testing.T) {
 	var buf bytes.Buffer
 	c := NewClient(WithBaseURL(ts.URL), WithDebug(true), WithLogger(&buf))
 	var result map[string]any
-	c.doPostJSON(context.Background(), "/test", nil, map[string]string{"key": "val"}, &result)
+	c.doPostJSON(context.Background(), "/test", nil, map[string]string{"key": "val", "access_token": "json-secret-value"}, &result)
 	if !bytes.Contains(buf.Bytes(), []byte("Request body:")) {
 		t.Error("debug output should contain request body log")
 	}
 	if !bytes.Contains(buf.Bytes(), []byte("key")) {
 		t.Error("debug output should contain the request body content")
+	}
+	if bytes.Contains(buf.Bytes(), []byte("json-secret-value")) {
+		t.Errorf("debug output leaked JSON credential: %s", buf.String())
 	}
 }
 
@@ -344,10 +345,13 @@ func TestClient_doPost_DebugBody(t *testing.T) {
 	var buf bytes.Buffer
 	c := NewClient(WithBaseURL(ts.URL), WithDebug(true), WithLogger(&buf))
 	var result map[string]any
-	body := map[string][]string{"field": {"value"}}
+	body := map[string][]string{"field": {"value"}, "client_secret": {"form-secret-value"}}
 	c.doPost(context.Background(), "/test", nil, body, &result)
 	if !bytes.Contains(buf.Bytes(), []byte("Request body:")) {
 		t.Error("debug output should contain request body log")
+	}
+	if bytes.Contains(buf.Bytes(), []byte("form-secret-value")) {
+		t.Errorf("debug output leaked form credential: %s", buf.String())
 	}
 }
 
@@ -613,13 +617,92 @@ func TestClient_Do_HTTPError_Diagnostics(t *testing.T) {
 }
 
 func TestRedactURL(t *testing.T) {
-	u, _ := url.Parse("https://pan.baidu.com/xpan/file?method=list&access_token=secret123")
+	u, _ := url.Parse("https://pan.baidu.com/xpan/file?method=list&access_token=access-value-123&client_secret=client-value-456&code=code-value-789&code_verifier=verifier-value-abc&refresh_token=refresh-value-def")
 	result := redactURL(u)
-	if strings.Contains(result, "secret123") {
-		t.Errorf("redactURL should redact access_token, got %q", result)
+	for _, secret := range []string{"access-value-123", "client-value-456", "code-value-789", "verifier-value-abc", "refresh-value-def"} {
+		if strings.Contains(result, secret) {
+			t.Errorf("redactURL should redact %q, got %q", secret, result)
+		}
+	}
+	redactedURL, err := url.Parse(result)
+	if err != nil {
+		t.Fatalf("url.Parse(redacted result): %v", err)
+	}
+	for _, key := range []string{"access_token", "client_secret", "code", "code_verifier", "refresh_token"} {
+		if got := redactedURL.Query().Get(key); got != "***" {
+			t.Errorf("%s = %q, want redacted value", key, got)
+		}
 	}
 	if !strings.Contains(result, "method=list") {
 		t.Errorf("redactURL should preserve other params, got %q", result)
+	}
+}
+
+func TestRedactJSON(t *testing.T) {
+	input := []byte(`{"access_token":"access-value-123","nested":{"refresh_token":"refresh-value-456"},"url":"https://example.com/callback?code=code-value-789&state=public"}`)
+	redacted := redactJSON(input)
+	for _, secret := range []string{"access-value-123", "refresh-value-456", "code-value-789"} {
+		if strings.Contains(redacted, secret) {
+			t.Fatalf("redactJSON leaked %q: %s", secret, redacted)
+		}
+	}
+	var payload struct {
+		AccessToken string `json:"access_token"`
+		Nested      struct {
+			RefreshToken string `json:"refresh_token"`
+		} `json:"nested"`
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(redacted), &payload); err != nil {
+		t.Fatalf("json.Unmarshal(redacted): %v", err)
+	}
+	if payload.AccessToken != "***" || payload.Nested.RefreshToken != "***" {
+		t.Fatalf("redacted credential values = %#v", payload)
+	}
+	redactedURL, err := url.Parse(payload.URL)
+	if err != nil {
+		t.Fatalf("url.Parse(redacted payload URL): %v", err)
+	}
+	if redactedURL.Query().Get("code") != "***" || redactedURL.Query().Get("state") != "public" {
+		t.Fatalf("redacted payload URL = %s", payload.URL)
+	}
+}
+
+func TestRedactForm(t *testing.T) {
+	values := url.Values{
+		"method":        {"token"},
+		"client_secret": {"secret value"},
+		"code":          {"code value"},
+	}
+	redacted, err := url.ParseQuery(redactForm(values))
+	if err != nil {
+		t.Fatalf("ParseQuery(redactForm()): %v", err)
+	}
+	if redacted.Get("method") != "token" || redacted.Get("client_secret") != "***" || redacted.Get("code") != "***" {
+		t.Fatalf("redacted form = %#v", redacted)
+	}
+	if values.Get("client_secret") != "secret value" {
+		t.Fatal("redactForm mutated its input")
+	}
+}
+
+func TestClientDoXpanErrorFields(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"errno":20023,"show_msg":"authorization code invalid","request_id":1234567890123456789}`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(WithBaseURL(ts.URL))
+	request, _ := http.NewRequest(http.MethodGet, ts.URL+"/xpan/oauth/get", nil)
+	var result map[string]any
+	_, err := client.Do(context.Background(), request, &result)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %v, want *APIError", err)
+	}
+	if apiErr.Errno != 20023 || apiErr.Errmsg != "authorization code invalid" || apiErr.RequestID != "1234567890123456789" {
+		t.Fatalf("APIError = %+v", apiErr)
 	}
 }
 
@@ -772,9 +855,12 @@ func TestClient_doPostMultipart_Debug(t *testing.T) {
 	u, _ := url.Parse(ts.URL)
 	c := NewClient(WithBaseURL(ts.URL), WithDebug(true), WithLogger(&buf))
 	var result map[string]any
-	c.doPostMultipart(context.Background(), u, "/upload", nil, "file", "test.txt", strings.NewReader("data"), &result)
+	c.doPostMultipart(context.Background(), u, "/upload", url.Values{"code": {"multipart-secret-value"}}, "file", "test.txt", strings.NewReader("data"), &result)
 	if !bytes.Contains(buf.Bytes(), []byte("Multipart upload")) {
 		t.Error("debug output should contain 'Multipart upload'")
+	}
+	if bytes.Contains(buf.Bytes(), []byte("multipart-secret-value")) {
+		t.Errorf("debug output leaked multipart URL credential: %s", buf.String())
 	}
 }
 

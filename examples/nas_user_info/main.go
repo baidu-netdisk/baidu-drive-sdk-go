@@ -1,11 +1,8 @@
 // NAS 用户信息查询示例（整合用户基本信息 + IoT 权限信息）
 //
 // 使用方式:
-//   1. 设置环境变量: export BAIDU_ACCESS_TOKEN=your_access_token
-//   2. 运行: go run main.go <device_id>
-//
-// 示例:
-//   BAIDU_ACCESS_TOKEN=xxx go run main.go your_device_id
+//   1. 设置 BAIDU_APP_KEY、BAIDU_SECRET_KEY、BAIDU_REDIRECT_URI
+//   2. 运行: go run ./examples/nas_user_info <device_id>
 
 package main
 
@@ -15,8 +12,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/baidu-netdisk/baidu-drive-sdk-go/baidudriver/api"
 	"github.com/baidu-netdisk/baidu-drive-sdk-go/baidudriver/scene"
+	"github.com/baidu-netdisk/baidu-drive-sdk-go/examples/internal/authclient"
 )
 
 func main() {
@@ -27,17 +24,15 @@ func main() {
 }
 
 func run(getenv func(string) string, args []string) error {
-	accessToken := getenv("BAIDU_ACCESS_TOKEN")
-	if accessToken == "" {
-		return fmt.Errorf("错误: 请设置 BAIDU_ACCESS_TOKEN 环境变量\n示例: export BAIDU_ACCESS_TOKEN=your_access_token")
-	}
-
 	if len(args) < 2 {
 		return fmt.Errorf("错误: 请提供 device_id 参数\n用法: go run main.go <device_id>")
 	}
 	deviceID := args[1]
 
-	client := api.NewClient(api.WithAccessToken(accessToken))
+	client, err := authclient.New(context.Background(), getenv, os.Stdout)
+	if err != nil {
+		return err
+	}
 	sc := scene.New(client)
 
 	return runWithScene(sc, deviceID)

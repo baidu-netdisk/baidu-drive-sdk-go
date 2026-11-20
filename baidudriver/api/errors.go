@@ -38,7 +38,7 @@ type APIError struct {
 	// 诊断信息（帮助开发者排查问题）
 	// Method 请求方法（GET/POST）。
 	Method string `json:"method,omitempty"`
-	// URL 请求 URL（OAuth 凭据已脱敏）。
+	// URL 请求 URL（access_token 已脱敏）。
 	URL string `json:"url,omitempty"`
 	// ResponseBody 响应体摘要（截断至 1024 字节）。
 	ResponseBody string `json:"response_body,omitempty"`

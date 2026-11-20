@@ -2,11 +2,13 @@
 //
 // 使用方式:
 //
-//	BAIDU_ACCESS_TOKEN=xxx go run examples/file_list/main.go [dir] [limit]
+//	BAIDU_APP_KEY=xxx BAIDU_SECRET_KEY=yyy \
+//	BAIDU_REDIRECT_URI=http://127.0.0.1:8787/oauth/callback \
+//	go run ./examples/file_list [dir] [limit]
 //
 // 示例:
 //
-//	BAIDU_ACCESS_TOKEN=xxx go run examples/file_list/main.go / 5
+//	go run ./examples/file_list / 5
 package main
 
 import (
@@ -16,16 +18,10 @@ import (
 	"strconv"
 
 	"github.com/baidu-netdisk/baidu-drive-sdk-go/baidudriver/api"
+	"github.com/baidu-netdisk/baidu-drive-sdk-go/examples/internal/authclient"
 )
 
 func main() {
-	token := os.Getenv("BAIDU_ACCESS_TOKEN")
-	if token == "" {
-		fmt.Fprintln(os.Stderr, "请设置环境变量 BAIDU_ACCESS_TOKEN")
-		fmt.Fprintln(os.Stderr, "用法: BAIDU_ACCESS_TOKEN=xxx go run examples/file_list/main.go [dir] [limit]")
-		os.Exit(1)
-	}
-
 	dir := "/"
 	limit := 5
 	if len(os.Args) > 1 {
@@ -41,11 +37,12 @@ func main() {
 	}
 
 	// 开启 debug 模式，打印完整请求 URL 和响应体
-	c := api.NewClient(
-		api.WithAccessToken(token),
-		api.WithDebug(true),
-	)
 	ctx := context.Background()
+	c, err := authclient.New(ctx, os.Getenv, os.Stdout, api.WithDebug(true))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	fmt.Printf("=== 测试 File.List limit 参数 ===\n")
 	fmt.Printf("目录: %s\n", dir)

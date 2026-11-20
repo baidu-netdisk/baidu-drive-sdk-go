@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -134,6 +137,43 @@ func TestPrintResults_ZeroDuration(t *testing.T) {
 	printResults("Zero", results, 1024)
 }
 
+func TestSummarizeResults(t *testing.T) {
+	results := []*benchResult{
+		{Duration: 100 * time.Millisecond, Bytes: 100},
+		{Duration: 300 * time.Millisecond, Err: errForTest("rate limited")},
+		{Duration: 200 * time.Millisecond, Bytes: 100},
+	}
+	report := summarizeResults(results)
+	if report.Requests != 3 || report.Successes != 2 || report.Failures != 1 {
+		t.Fatalf("summarizeResults counts = %+v", report)
+	}
+	if report.P50MS != 150 || report.P95MS != 195 || report.P99MS != 199 {
+		t.Fatalf("summarizeResults percentiles = %+v", report)
+	}
+	if report.ThroughputRPS <= 0 || report.Errors["rate limited"] != 1 {
+		t.Fatalf("summarizeResults metrics = %+v", report)
+	}
+}
+
+func TestWriteBenchmarkReport(t *testing.T) {
+	path := t.TempDir() + "/result.json"
+	want := benchmarkReport{Requests: 2, Successes: 2, P50MS: 1.5}
+	if err := writeBenchmarkReport(path, want); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got benchmarkReport
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Requests != want.Requests || got.Successes != want.Successes || got.P50MS != want.P50MS {
+		t.Fatalf("written benchmark report = %+v", got)
+	}
+}
+
 type errForTest string
 
 func (e errForTest) Error() string { return string(e) }
@@ -164,6 +204,50 @@ func TestRunBenchmark_WithErrors(t *testing.T) {
 	}
 	if results[1].Err == nil {
 		t.Error("results[1] should have error")
+	}
+}
+
+func TestRun_RejectsInvalidOptions(t *testing.T) {
+	origMode, origCount, origConcurrency := *mode, *count, *concurrency
+	defer func() {
+		*mode = origMode
+		*count = origCount
+		*concurrency = origConcurrency
+	}()
+
+	client := api.NewClient()
+	sc := scene.New(client)
+	for _, tt := range []struct {
+		name string
+		set  func()
+		want string
+	}{
+		{name: "mode", set: func() { *mode = "invalid" }, want: "invalid mode"},
+		{name: "concurrency", set: func() { *mode, *concurrency = "upload", 0 }, want: "concurrency"},
+		{name: "count", set: func() { *mode, *concurrency, *count = "upload", 1, 0 }, want: "count"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			*mode, *count, *concurrency = "both", 1, 1
+			tt.set()
+			if err := run(context.Background(), sc, client, 1); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("run error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestBenchQuota_Success(t *testing.T) {
+	ts := newBenchTestServer(t)
+	defer ts.Close()
+
+	origMode, origCount, origConc := *mode, *count, *concurrency
+	*mode, *count, *concurrency = "quota", 3, 2
+	defer func() { *mode, *count, *concurrency = origMode, origCount, origConc }()
+
+	c := api.NewClient(api.WithBaseURL(ts.URL))
+	sc := scene.New(c)
+	if err := run(context.Background(), sc, c, 1); err != nil {
+		t.Fatalf("quota benchmark failed: %v", err)
 	}
 }
 
@@ -273,6 +357,43 @@ func TestBenchDownload_APIError(t *testing.T) {
 	}
 }
 
+func TestBenchFileInfo_AllOperations(t *testing.T) {
+	ts := newBenchTestServer(t)
+	defer ts.Close()
+
+	c := api.NewClient(api.WithBaseURL(ts.URL))
+	origPath, origFSID := *fileInfoPath, *fileInfoFsID
+	*fileInfoPath, *fileInfoFsID = "/apps/test", 12345
+	defer func() { *fileInfoPath, *fileInfoFsID = origPath, origFSID }()
+
+	for i := 0; i < 11; i++ {
+		result := benchFileInfo(context.Background(), c, 12345, i)
+		if result.Err != nil {
+			t.Fatalf("operation %d failed: %v", i, result.Err)
+		}
+		if result.Duration < 0 {
+			t.Fatalf("operation %d duration = %v", i, result.Duration)
+		}
+	}
+}
+
+func TestRun_FileInfoMode(t *testing.T) {
+	ts := newBenchTestServer(t)
+	defer ts.Close()
+
+	c := api.NewClient(api.WithBaseURL(ts.URL))
+	sc := scene.New(c)
+	origMode, origCount, origConcurrency, origPath, origFSID := *mode, *count, *concurrency, *fileInfoPath, *fileInfoFsID
+	*mode, *count, *concurrency, *fileInfoPath, *fileInfoFsID = "file-info", 11, 2, "/apps/test", 12345
+	defer func() {
+		*mode, *count, *concurrency, *fileInfoPath, *fileInfoFsID = origMode, origCount, origConcurrency, origPath, origFSID
+	}()
+
+	if err := run(context.Background(), sc, c, 1); err != nil {
+		t.Fatalf("file-info run failed: %v", err)
+	}
+}
+
 func TestPrepareDownloadFile_Success(t *testing.T) {
 	ts := newBenchTestServer(t)
 	defer ts.Close()
@@ -362,6 +483,41 @@ func TestRun_UploadMode(t *testing.T) {
 	err := run(context.Background(), sc, c, 100)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRun_WritesIterationLoadResult(t *testing.T) {
+	ts := newBenchTestServer(t)
+	defer ts.Close()
+
+	resultPath := t.TempDir() + "/load-result.json"
+	t.Setenv("ITERATION_LOAD_RESULT", resultPath)
+	c := api.NewClient(api.WithBaseURL(ts.URL), api.WithPCSBaseURL(ts.URL))
+	sc := scene.New(c)
+
+	origMode, origCount, origConc := *mode, *count, *concurrency
+	*mode = "upload"
+	*count = 2
+	*concurrency = 1
+	defer func() {
+		*mode = origMode
+		*count = origCount
+		*concurrency = origConc
+	}()
+
+	if err := run(context.Background(), sc, c, 100); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	raw, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report benchmarkReport
+	if err := json.Unmarshal(raw, &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Requests != 2 || report.Successes != 2 || report.Failures != 0 {
+		t.Fatalf("iteration load result = %+v", report)
 	}
 }
 
